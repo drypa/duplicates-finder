@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"duplicates-github.com/drypa/duplicates-finder/files"
 	"fmt"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -8,6 +9,10 @@ import (
 	"path/filepath"
 	"sync"
 )
+
+var sParam = "source-dir"
+var tParam = "target-dir"
+var parallelism = 5
 
 func NewFindDuplicatesCommand() *cobra.Command {
 	var sourceDir string
@@ -18,31 +23,46 @@ func NewFindDuplicatesCommand() *cobra.Command {
 		Short: "duplicates finds duplicate files",
 		RunE:  run,
 	}
-	c.Flags().StringVarP(&sourceDir, "source-dir", "s", "", "Source Directory")
-	c.Flags().StringVarP(&targetDir, "target-dir", "t", "", "Target Directory")
-	_ = c.MarkFlagRequired("source-dir")
-	_ = c.MarkFlagRequired("target-dir")
+
+	c.Flags().StringVarP(&sourceDir, sParam, "s", "", "Source Directory")
+	c.Flags().StringVarP(&targetDir, tParam, "t", "", "Target Directory")
+	_ = c.MarkFlagRequired(sParam)
+	_ = c.MarkFlagRequired(tParam)
 	return c
 }
 
+type callback func(string)
+
 func run(cmd *cobra.Command, _ []string) error {
-	sourceDir, err := cmd.Flags().GetString("source-dir")
+	sourceDir, err := cmd.Flags().GetString(sParam)
 	if err != nil {
 		return err
 	}
-	targetDir, err := cmd.Flags().GetString("target-dir")
+	targetDir, err := cmd.Flags().GetString(tParam)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Source Directory: '%s'\n", sourceDir)
 	fmt.Printf("Target Directory: '%s'\n", targetDir)
-	getFiles(sourceDir)
+	var sourceFiles = make(map[string]*files.File)
+	cb := func(path string) {
+		file, err := files.NewFile(path)
+		if err != nil {
+			fmt.Println("Error:", err)
+		}
+		if file != nil {
+
+		}
+		fmt.Println("File:", path)
+		sourceFiles[file.FileName()] = file
+	}
+	getFiles(sourceDir, cb)
 	return nil
 }
-func getFiles(dir string) {
+func getFiles(dir string, cb callback) {
 	res := make(chan string)
 	errs := make(chan error)
-	semaphore := make(chan struct{}, 5)
+	semaphore := make(chan struct{}, parallelism)
 	var wg sync.WaitGroup
 
 	wg.Add(1)
@@ -56,7 +76,8 @@ func getFiles(dir string) {
 	}(&wg)
 
 	for path := range res {
-		fmt.Println("File:", path)
+		cb(path)
+
 	}
 
 	for err := range errs {
