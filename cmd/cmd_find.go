@@ -53,7 +53,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		if file != nil {
 
 		}
-		fmt.Println("File:", path)
+		fmt.Printf("File: %s, hash: %s, size: %db \n", path, file.Hash, file.Size)
 		sourceFiles[file.FileName()] = file
 	}
 	getFiles(sourceDir, cb)

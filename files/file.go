@@ -10,9 +10,9 @@ import (
 )
 
 type File struct {
-	size     int64
-	fullPath string
-	hash     string
+	Size     int64
+	FullPath string
+	Hash     string
 }
 
 func NewFile(fullPath string) (*File, error) {
@@ -25,7 +25,7 @@ func NewFile(fullPath string) (*File, error) {
 		return nil, errors.Wrapf(err, "failed to hash file '%s'", fullPath)
 	}
 
-	f := &File{fullPath: fullPath, size: stat.Size(), hash: hash}
+	f := &File{FullPath: fullPath, Size: stat.Size(), Hash: hash}
 	return f, nil
 }
 
@@ -46,9 +46,9 @@ func hashFile(filePath string) (string, error) {
 }
 
 func (f *File) FileName() string {
-	return filepath.Base(f.fullPath)
+	return filepath.Base(f.FullPath)
 }
 
 func (f *File) Equals(other *File) bool {
-	return f.size == other.size && f.FileName() == other.FileName() && f.hash == other.hash
+	return f.Size == other.Size && f.FileName() == other.FileName() && f.Hash == other.Hash
 }
