@@ -25,7 +25,7 @@ func NewFindDuplicatesCommand() *cobra.Command {
 	return c
 }
 
-func run(cmd *cobra.Command, args []string) error {
+func run(cmd *cobra.Command, _ []string) error {
 	sourceDir, err := cmd.Flags().GetString("source-dir")
 	if err != nil {
 		return err
