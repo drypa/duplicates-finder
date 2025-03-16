@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -65,8 +66,8 @@ func run(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if parallelism <= 0 {
-		return errors.New("parallelism must be greater than zero")
+	if parallelism <= 1 {
+		return errors.New("parallelism must be greater or equal to 1")
 	}
 
 	fmt.Printf("Source Directory: '%s'\n", sourceDir)
@@ -75,37 +76,53 @@ func run(cmd *cobra.Command, _ []string) error {
 	fillSourceFiles(sourceDir, parallelism)
 	fmt.Printf("%d files found in source directory\n", len(sourceFiles))
 	iterateTargetFiles(targetDir, parallelism, a)
+
 	return nil
 }
 
 func iterateTargetFiles(dir string, parallelism int, a actions.Action) {
+	filesToDelete := make([]string, 0)
 	cb := func(target string) {
 		name := filepath.Base(target)
-		file := sourceFiles[name]
-		if file != nil {
-			sourceFile, err := files.NewFile(target)
+		sourceFile := sourceFiles[name]
+		if sourceFile != nil {
+			targetFile, err := files.NewFile(target)
 			if err == nil {
-				if sourceFile.FullPath == file.FullPath {
-					fmt.Printf("Same file '%s' skipped\n", sourceFile)
+				if sourceFile.FullPath == targetFile.FullPath {
+					fmt.Printf("Same file '%s' skipped\n", sourceFile.FullPath)
 					return
 				}
-				if file.Size == sourceFile.Size && file.Hash == sourceFile.Hash {
+				if targetFile.Size == sourceFile.Size && targetFile.Hash == sourceFile.Hash {
 					switch a {
 					case actions.Print:
-						fmt.Printf("source %s equals to %s\n", file.FullPath, sourceFile)
+						fmt.Printf("source %s equals to %s\n", sourceFile.FullPath, targetFile.FullPath)
 					case actions.DeleteSource:
-						deleteFile(sourceFile.FullPath)
+						filesToDelete = append(filesToDelete, sourceFile.FullPath)
 					case actions.DeleteTarget:
-						deleteFile(target)
+						filesToDelete = append(filesToDelete, targetFile.FullPath)
 					default:
 
 					}
 				}
 			}
 		}
-
 	}
 	getFiles(dir, cb, parallelism)
+
+	if len(filesToDelete) > 0 {
+		for _, fileToDelete := range filesToDelete {
+			fmt.Printf("%s\n", fileToDelete)
+		}
+		fmt.Printf("Do you want to delete these files? (y/n): ")
+		a := ""
+		fmt.Scan(&a)
+		if strings.ToLower(a) == "y" {
+			for _, fileToDelete := range filesToDelete {
+				deleteFile(fileToDelete)
+			}
+		}
+
+	}
 }
 
 func deleteFile(path string) {
@@ -136,17 +153,21 @@ func getFiles(dir string, cb callback, parallelism int) {
 
 	wg.Add(1)
 	semaphore <- struct{}{}
-	go getFilesFromDirIncludeChildren(dir, res, errs, &wg, semaphore)
+	go func() {
+		defer wg.Done()
+		defer func() { <-semaphore }()
+		getFilesFromDirIncludeChildren(dir, res, errs, &wg, semaphore)
+	}()
 
 	go func(wg *sync.WaitGroup) {
 		wg.Wait()
 		close(res)
 		close(errs)
+		close(semaphore)
 	}(&wg)
 
 	for path := range res {
 		cb(path)
-
 	}
 
 	for err := range errs {
@@ -155,8 +176,6 @@ func getFiles(dir string, cb callback, parallelism int) {
 }
 
 func getFilesFromDirIncludeChildren(dir string, res chan<- string, errs chan<- error, wg *sync.WaitGroup, sem chan struct{}) {
-	defer wg.Done()
-	defer func() { <-sem }()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		errs <- errors.Wrapf(err, "error reading directory %s", dir)
@@ -165,10 +184,17 @@ func getFilesFromDirIncludeChildren(dir string, res chan<- string, errs chan<- e
 	for _, entry := range entries {
 		fullPath := filepath.Join(dir, entry.Name())
 		if entry.IsDir() {
-			wg.Add(1)
-			sem <- struct{}{}
-			getFilesFromDirIncludeChildren(fullPath, res, errs, wg, sem)
-
+			select {
+			case sem <- struct{}{}:
+				wg.Add(1)
+				go func(path string) {
+					defer wg.Done()
+					defer func() { <-sem }()
+					getFilesFromDirIncludeChildren(path, res, errs, wg, sem)
+				}(fullPath)
+			default:
+				getFilesFromDirIncludeChildren(fullPath, res, errs, wg, sem)
+			}
 		} else {
 			res <- fullPath
 		}
