@@ -10,7 +10,8 @@ type Action int
 const (
 	Nothing Action = iota
 	Print
-	Delete
+	DeleteSource
+	DeleteTarget
 )
 
 func GetAction(action string) Action {
@@ -19,8 +20,10 @@ func GetAction(action string) Action {
 		return Nothing
 	case "print":
 		return Print
-	case "delete":
-		return Delete
+	case "delete-source":
+		return DeleteSource
+	case "delete-target":
+		return DeleteTarget
 	default:
 		fmt.Printf("invalid action '%s'\n", action)
 		return Nothing

@@ -79,26 +79,24 @@ func run(cmd *cobra.Command, _ []string) error {
 }
 
 func iterateTargetFiles(dir string, parallelism int, a actions.Action) {
-	cb := func(path string) {
-		name := filepath.Base(path)
+	cb := func(target string) {
+		name := filepath.Base(target)
 		file := sourceFiles[name]
 		if file != nil {
-			newFile, err := files.NewFile(path)
+			sourceFile, err := files.NewFile(target)
 			if err == nil {
-				if path == file.FullPath {
-					fmt.Printf("Same file '%s' skipped\n", path)
+				if sourceFile.FullPath == file.FullPath {
+					fmt.Printf("Same file '%s' skipped\n", sourceFile)
 					return
 				}
-				if file.Size == newFile.Size && file.Hash == newFile.Hash {
+				if file.Size == sourceFile.Size && file.Hash == sourceFile.Hash {
 					switch a {
 					case actions.Print:
-						fmt.Printf("source %s equals to %s\n", file.FullPath, path)
-					case actions.Delete:
-						err := os.Remove(path)
-						if err != nil {
-							fmt.Printf("failed to remove file %s: %v\n", path, err)
-						}
-						fmt.Printf("source %s equals to %s. delete... \n", path, file.FullPath)
+						fmt.Printf("source %s equals to %s\n", file.FullPath, sourceFile)
+					case actions.DeleteSource:
+						deleteFile(sourceFile.FullPath)
+					case actions.DeleteTarget:
+						deleteFile(target)
 					default:
 
 					}
@@ -108,6 +106,14 @@ func iterateTargetFiles(dir string, parallelism int, a actions.Action) {
 
 	}
 	getFiles(dir, cb, parallelism)
+}
+
+func deleteFile(path string) {
+	err := os.Remove(path)
+	if err != nil {
+		fmt.Printf("failed to remove file %s: %v\n", path, err)
+	}
+	fmt.Printf("%s deleted\n", path)
 }
 
 func fillSourceFiles(sourceDir string, parallelism int) {
