@@ -89,7 +89,6 @@ func iterateTargetFiles(dir string, parallelism int, a actions.Action) {
 			targetFile, err := files.NewFile(target)
 			if err == nil {
 				if sourceFile.FullPath == targetFile.FullPath {
-					fmt.Printf("Same file '%s' skipped\n", sourceFile.FullPath)
 					return
 				}
 				if targetFile.Size == sourceFile.Size && targetFile.Hash == sourceFile.Hash {
@@ -134,16 +133,23 @@ func deleteFile(path string) {
 }
 
 func fillSourceFiles(sourceDir string, parallelism int) {
+	var filesChan = make(chan *files.File)
 	cb := func(path string) {
 		file, err := files.NewFile(path)
 		if err != nil {
 			fmt.Println("Error:", err)
 		}
 		if file != nil {
-			sourceFiles[file.FileName()] = file
+			filesChan <- file
 		}
 	}
+	go func() {
+		for file := range filesChan {
+			sourceFiles[file.FileName()] = file
+		}
+	}()
 	getFiles(sourceDir, cb, parallelism)
+
 }
 func getFiles(dir string, cb callback, parallelism int) {
 	res := make(chan string)
@@ -166,9 +172,18 @@ func getFiles(dir string, cb callback, parallelism int) {
 		close(semaphore)
 	}(&wg)
 
+	var processWg sync.WaitGroup
+	processingSem := make(chan struct{}, parallelism)
 	for path := range res {
-		cb(path)
+		processWg.Add(1)
+		processingSem <- struct{}{}
+		go func(p string) {
+			defer processWg.Done()
+			defer func() { <-processingSem }()
+			cb(p)
+		}(path)
 	}
+	processWg.Wait()
 
 	for err := range errs {
 		fmt.Println("Error:", err)
