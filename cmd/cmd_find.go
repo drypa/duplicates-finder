@@ -73,8 +73,11 @@ func run(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("Source Directory: '%s'\n", sourceDir)
 	fmt.Printf("Target Directory: '%s'\n", targetDir)
 
+	fmt.Println("Indexing source directory...")
 	fillSourceFiles(sourceDir, parallelism)
 	fmt.Printf("%d files found in source directory\n", len(sourceFiles))
+
+	fmt.Println("Iterate target directory...")
 	iterateTargetFiles(targetDir, parallelism, a)
 
 	return nil
