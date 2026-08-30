@@ -140,6 +140,7 @@ func deleteFile(path string) {
 }
 
 func fillSourceFiles(sourceDir string, parallelism int) {
+	sourceFiles = make(map[string]*files.File)
 	var filesChan = make(chan *files.File)
 	cb := func(path string) {
 		file, err := files.NewFile(path)
@@ -150,13 +151,17 @@ func fillSourceFiles(sourceDir string, parallelism int) {
 			filesChan <- file
 		}
 	}
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for file := range filesChan {
 			sourceFiles[file.FileName()] = file
 		}
 	}()
 	getFiles(sourceDir, cb, parallelism)
-
+	close(filesChan)
+	wg.Wait()
 }
 func getFiles(dir string, cb callback, parallelism int) {
 	res := make(chan string)
