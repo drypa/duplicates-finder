@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"duplicates-github.com/drypa/duplicates-finder/actions"
 	"duplicates-github.com/drypa/duplicates-finder/files"
 	"fmt"
@@ -42,6 +43,7 @@ type callback func(string)
 var sourceFiles = make(map[string]*files.File)
 
 func run(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 	sourceDir, err := cmd.Flags().GetString(sParam)
 	if err != nil {
 		return err
@@ -73,23 +75,44 @@ func run(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("Source Directory: '%s'\n", sourceDir)
 	fmt.Printf("Target Directory: '%s'\n", targetDir)
 
+	if err := ctx.Err(); err != nil {
+		fmt.Println("Operation cancelled")
+		return nil
+	}
+
 	fmt.Println("Indexing source directory...")
-	fillSourceFiles(sourceDir, parallelism)
+	if err := fillSourceFiles(ctx, sourceDir, parallelism); err != nil {
+		if ctx.Err() != nil {
+			fmt.Println("Operation cancelled during indexing")
+			return nil
+		}
+		return err
+	}
 	fmt.Printf("%d files found in source directory\n", len(sourceFiles))
 
+	if err := ctx.Err(); err != nil {
+		fmt.Println("Operation cancelled")
+		return nil
+	}
+
 	fmt.Println("Iterate target directory...")
-	iterateTargetFiles(targetDir, parallelism, a)
+	iterateTargetFiles(ctx, targetDir, parallelism, a)
+
+	if ctx.Err() != nil {
+		fmt.Println("Operation cancelled")
+		return nil
+	}
 
 	return nil
 }
 
-func iterateTargetFiles(dir string, parallelism int, a actions.Action) {
+func iterateTargetFiles(ctx context.Context, dir string, parallelism int, a actions.Action) {
 	filesToDeleteSet := make(map[string]struct{})
 	cb := func(target string) {
 		name := filepath.Base(target)
 		sourceFile := sourceFiles[name]
 		if sourceFile != nil {
-			targetFile, err := files.NewFile(target)
+			targetFile, err := files.NewFile(ctx, target)
 			if err == nil {
 				if sourceFile.FullPath == targetFile.FullPath {
 					return
@@ -109,7 +132,11 @@ func iterateTargetFiles(dir string, parallelism int, a actions.Action) {
 			}
 		}
 	}
-	getFiles(dir, cb, parallelism)
+	getFiles(ctx, dir, cb, parallelism)
+
+	if ctx.Err() != nil {
+		return
+	}
 
 	if len(filesToDeleteSet) > 0 {
 		filesToDelete := make([]string, 0, len(filesToDeleteSet))
@@ -139,17 +166,22 @@ func deleteFile(path string) {
 	fmt.Printf("%s deleted\n", path)
 }
 
-func fillSourceFiles(sourceDir string, parallelism int) {
+func fillSourceFiles(ctx context.Context, sourceDir string, parallelism int) error {
 	sourceFiles = make(map[string]*files.File)
 	var filesChan = make(chan *files.File)
 	cb := func(path string) {
-		file, err := files.NewFile(path)
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		file, err := files.NewFile(ctx, path)
 		if err != nil {
+			if files.IsCancelled(err) {
+				return
+			}
 			fmt.Println("Error:", err)
+			return
 		}
-		if file != nil {
-			filesChan <- file
-		}
+		filesChan <- file
 	}
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -159,11 +191,12 @@ func fillSourceFiles(sourceDir string, parallelism int) {
 			sourceFiles[file.FileName()] = file
 		}
 	}()
-	getFiles(sourceDir, cb, parallelism)
+	err := getFiles(ctx, sourceDir, cb, parallelism)
 	close(filesChan)
 	wg.Wait()
+	return err
 }
-func getFiles(dir string, cb callback, parallelism int) {
+func getFiles(ctx context.Context, dir string, cb callback, parallelism int) error {
 	res := make(chan string)
 	errs := make(chan error)
 	semaphore := make(chan struct{}, parallelism)
@@ -174,7 +207,7 @@ func getFiles(dir string, cb callback, parallelism int) {
 	go func() {
 		defer wg.Done()
 		defer func() { <-semaphore }()
-		getFilesFromDirIncludeChildren(dir, res, errs, &wg, semaphore)
+		getFilesFromDirIncludeChildren(ctx, dir, res, errs, &wg, semaphore)
 	}()
 
 	go func(wg *sync.WaitGroup) {
@@ -186,29 +219,58 @@ func getFiles(dir string, cb callback, parallelism int) {
 
 	var processWg sync.WaitGroup
 	processingSem := make(chan struct{}, parallelism)
-	for path := range res {
-		processWg.Add(1)
-		processingSem <- struct{}{}
-		go func(p string) {
-			defer processWg.Done()
-			defer func() { <-processingSem }()
-			cb(p)
-		}(path)
+	for {
+		select {
+		case <-ctx.Done():
+			goto done
+		case path, ok := <-res:
+			if !ok {
+				processWg.Wait()
+				goto done
+			}
+			processWg.Add(1)
+			processingSem <- struct{}{}
+			go func(p string) {
+				defer processWg.Done()
+				defer func() { <-processingSem }()
+				cb(p)
+			}(path)
+		}
 	}
-	processWg.Wait()
 
-	for err := range errs {
-		fmt.Println("Error:", err)
-	}
+done:
+	errCh := make(chan error, 1)
+	go func() {
+		var firstErr error
+		for err := range errs {
+			if firstErr == nil {
+				firstErr = err
+			}
+			fmt.Println("Error:", err)
+		}
+		errCh <- firstErr
+	}()
+	processWg.Wait()
+	<-errCh
+	return nil
 }
 
-func getFilesFromDirIncludeChildren(dir string, res chan<- string, errs chan<- error, wg *sync.WaitGroup, sem chan struct{}) {
+func getFilesFromDirIncludeChildren(ctx context.Context, dir string, res chan<- string, errs chan<- error, wg *sync.WaitGroup, sem chan struct{}) {
+	if err := ctx.Err(); err != nil {
+		return
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		errs <- errors.Wrapf(err, "error reading directory %s", dir)
 		return
 	}
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return
+		}
 		fullPath := filepath.Join(dir, entry.Name())
 		if entry.IsDir() {
 			select {
@@ -217,13 +279,17 @@ func getFilesFromDirIncludeChildren(dir string, res chan<- string, errs chan<- e
 				go func(path string) {
 					defer wg.Done()
 					defer func() { <-sem }()
-					getFilesFromDirIncludeChildren(path, res, errs, wg, sem)
+					getFilesFromDirIncludeChildren(ctx, path, res, errs, wg, sem)
 				}(fullPath)
 			default:
-				getFilesFromDirIncludeChildren(fullPath, res, errs, wg, sem)
+				getFilesFromDirIncludeChildren(ctx, fullPath, res, errs, wg, sem)
 			}
 		} else {
-			res <- fullPath
+			select {
+			case <-ctx.Done():
+				return
+			case res <- fullPath:
+			}
 		}
 	}
 }
