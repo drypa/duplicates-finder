@@ -24,6 +24,8 @@ No test suite exists. No lint/format tooling is configured.
 
 `Delete*` actions prompt for confirmation (`y/n`) before deleting.
 
+`--action delete-source` deletes the **source** (reference) files that matched duplicates in target — it does not delete the found target duplicates. `delete-target` deletes the target duplicates. Both dedupe paths so the same file is never entered into the deletion list twice (relevant for `delete-source`, where one source file can match multiple target duplicates).
+
 ## Architecture
 
 - `main.go` — entrypoint, delegates to `cmd`

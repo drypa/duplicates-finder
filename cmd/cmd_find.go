@@ -84,7 +84,7 @@ func run(cmd *cobra.Command, _ []string) error {
 }
 
 func iterateTargetFiles(dir string, parallelism int, a actions.Action) {
-	filesToDelete := make([]string, 0)
+	filesToDeleteSet := make(map[string]struct{})
 	cb := func(target string) {
 		name := filepath.Base(target)
 		sourceFile := sourceFiles[name]
@@ -99,9 +99,9 @@ func iterateTargetFiles(dir string, parallelism int, a actions.Action) {
 					case actions.Print:
 						fmt.Printf("source %s equals to %s\n", sourceFile.FullPath, targetFile.FullPath)
 					case actions.DeleteSource:
-						filesToDelete = append(filesToDelete, sourceFile.FullPath)
+						filesToDeleteSet[sourceFile.FullPath] = struct{}{}
 					case actions.DeleteTarget:
-						filesToDelete = append(filesToDelete, targetFile.FullPath)
+						filesToDeleteSet[targetFile.FullPath] = struct{}{}
 					default:
 
 					}
@@ -111,7 +111,11 @@ func iterateTargetFiles(dir string, parallelism int, a actions.Action) {
 	}
 	getFiles(dir, cb, parallelism)
 
-	if len(filesToDelete) > 0 {
+	if len(filesToDeleteSet) > 0 {
+		filesToDelete := make([]string, 0, len(filesToDeleteSet))
+		for f := range filesToDeleteSet {
+			filesToDelete = append(filesToDelete, f)
+		}
 		for _, fileToDelete := range filesToDelete {
 			fmt.Printf("%s\n", fileToDelete)
 		}
