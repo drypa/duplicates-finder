@@ -151,7 +151,7 @@ func iterateTargetFiles(ctx context.Context, dir string, parallelism int, a acti
 		for _, fileToDelete := range filesToDelete {
 			fmt.Printf("%s\n", fileToDelete)
 		}
-		fmt.Printf("Do you want to delete these files? (y/n): ")
+		fmt.Printf("Found %d duplicates. Do you want to delete these files? (y/n): ", len(filesToDelete))
 		a := ""
 		fmt.Scan(&a)
 		if strings.ToLower(a) == "y" {
