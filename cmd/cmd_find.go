@@ -108,6 +108,7 @@ func run(cmd *cobra.Command, _ []string) error {
 
 func iterateTargetFiles(ctx context.Context, dir string, parallelism int, a actions.Action) {
 	filesToDeleteSet := make(map[string]struct{})
+	var mu sync.Mutex
 	cb := func(target string) {
 		name := filepath.Base(target)
 		sourceFile := sourceFiles[name]
@@ -122,9 +123,13 @@ func iterateTargetFiles(ctx context.Context, dir string, parallelism int, a acti
 					case actions.Print:
 						fmt.Printf("source %s equals to %s\n", sourceFile.FullPath, targetFile.FullPath)
 					case actions.DeleteSource:
+						mu.Lock()
 						filesToDeleteSet[sourceFile.FullPath] = struct{}{}
+						mu.Unlock()
 					case actions.DeleteTarget:
+						mu.Lock()
 						filesToDeleteSet[targetFile.FullPath] = struct{}{}
+						mu.Unlock()
 					default:
 
 					}
